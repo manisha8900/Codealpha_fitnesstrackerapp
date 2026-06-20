@@ -1,0 +1,395 @@
+import { useState, useEffect } from "react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid } from "recharts";
+
+const ACCENT = "#00e5a0";
+const ACCENT2 = "#ff6584";
+const ACCENT3 = "#6c63ff";
+
+const EXERCISE_TYPES = ["Running", "Walking", "Cycling", "Swimming", "Gym/Weights", "Yoga", "HIIT", "Other"];
+
+const MET = { Running: 9.8, Walking: 3.5, Cycling: 7.5, Swimming: 8.0, "Gym/Weights": 5.0, Yoga: 2.5, HIIT: 10.0, Other: 5.0 };
+const WEIGHT_KG = 60;
+
+function calcCalories(type, minutes) {
+  return Math.round((MET[type] || 5) * WEIGHT_KG * (minutes / 60));
+}
+
+function getWeekDays() {
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const today = new Date();
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(today);
+    d.setDate(today.getDate() - (6 - i));
+    return { label: days[d.getDay()], date: d.toISOString().slice(0, 10), isToday: i === 6 };
+  });
+}
+
+function getTodayStr() { return new Date().toISOString().slice(0, 10); }
+
+const SAMPLE_LOGS = (() => {
+  const today = new Date();
+  const logs = [];
+  const samples = [
+    { type: "Running", minutes: 30, steps: 4200 },
+    { type: "Yoga", minutes: 45, steps: 800 },
+    { type: "HIIT", minutes: 20, steps: 1500 },
+    { type: "Walking", minutes: 40, steps: 3800 },
+    { type: "Cycling", minutes: 35, steps: 600 },
+    { type: "Gym/Weights", minutes: 50, steps: 1200 },
+  ];
+  samples.forEach((s, i) => {
+    const d = new Date(today);
+    d.setDate(today.getDate() - (5 - i));
+    logs.push({
+      id: i + 1,
+      date: d.toISOString().slice(0, 10),
+      ...s,
+      calories: calcCalories(s.type, s.minutes),
+    });
+  });
+  return logs;
+})();
+
+let nextLogId = 20;
+
+// ── Stat Card ──
+function StatCard({ icon, label, value, unit, color }) {
+  return (
+    <div style={{
+      background: "rgba(255,255,255,0.05)",
+      border: `1px solid ${color}33`,
+      borderRadius: "16px",
+      padding: "20px",
+      flex: "1",
+      minWidth: "130px",
+      textAlign: "center",
+    }}>
+      <div style={{ fontSize: "26px", marginBottom: "6px" }}>{icon}</div>
+      <div style={{ color, fontSize: "22px", fontWeight: "800", lineHeight: 1 }}>{value}</div>
+      <div style={{ color: "rgba(255,255,255,0.4)", fontSize: "11px", marginTop: "4px", letterSpacing: "1px", textTransform: "uppercase" }}>{unit}</div>
+      <div style={{ color: "rgba(255,255,255,0.55)", fontSize: "12px", marginTop: "2px" }}>{label}</div>
+    </div>
+  );
+}
+
+// ── Progress Bar ──
+function ProgressBar({ value, max, color, label, current, goal }) {
+  const pct = Math.min(100, Math.round((value / max) * 100));
+  return (
+    <div style={{ marginBottom: "16px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
+        <span style={{ color: "rgba(255,255,255,0.7)", fontSize: "13px" }}>{label}</span>
+        <span style={{ color, fontSize: "13px", fontWeight: "700" }}>{current} / {goal}</span>
+      </div>
+      <div style={{ background: "rgba(255,255,255,0.08)", borderRadius: "8px", height: "10px", overflow: "hidden" }}>
+        <div style={{
+          width: `${pct}%`, height: "100%",
+          background: `linear-gradient(90deg, ${color}88, ${color})`,
+          borderRadius: "8px",
+          transition: "width 0.8s ease",
+        }} />
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const [logs, setLogs] = useState(SAMPLE_LOGS);
+  const [view, setView] = useState("dashboard"); // dashboard | log | history
+  const [form, setForm] = useState({ type: "Running", minutes: "", steps: "", date: getTodayStr() });
+  const [formError, setFormError] = useState("");
+  const [added, setAdded] = useState(false);
+
+  const weekDays = getWeekDays();
+  const today = getTodayStr();
+
+  // Today's logs
+  const todayLogs = logs.filter(l => l.date === today);
+  const todaySteps = todayLogs.reduce((s, l) => s + (l.steps || 0), 0);
+  const todayCalories = todayLogs.reduce((s, l) => s + l.calories, 0);
+  const todayMinutes = todayLogs.reduce((s, l) => s + l.minutes, 0);
+  const todayWorkouts = todayLogs.length;
+
+  // Weekly chart data
+  const weekData = weekDays.map(d => {
+    const dayLogs = logs.filter(l => l.date === d.date);
+    return {
+      day: d.label,
+      calories: dayLogs.reduce((s, l) => s + l.calories, 0),
+      minutes: dayLogs.reduce((s, l) => s + l.minutes, 0),
+      steps: dayLogs.reduce((s, l) => s + (l.steps || 0), 0),
+    };
+  });
+
+  const submitLog = () => {
+    if (!form.minutes || isNaN(form.minutes) || Number(form.minutes) <= 0) {
+      setFormError("Please enter valid workout duration.");
+      return;
+    }
+    const cal = calcCalories(form.type, Number(form.minutes));
+    const newLog = {
+      id: nextLogId++,
+      date: form.date,
+      type: form.type,
+      minutes: Number(form.minutes),
+      steps: Number(form.steps) || 0,
+      calories: cal,
+    };
+    setLogs(prev => [newLog, ...prev]);
+    setForm({ type: "Running", minutes: "", steps: "", date: getTodayStr() });
+    setFormError("");
+    setAdded(true);
+    setTimeout(() => { setAdded(false); setView("dashboard"); }, 1200);
+  };
+
+  const deleteLog = (id) => setLogs(prev => prev.filter(l => l.id !== id));
+
+  const S = {
+    root: {
+      minHeight: "100vh",
+      background: "linear-gradient(160deg, #0a0a1a 0%, #0d1b2a 50%, #0a1628 100%)",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      fontFamily: "'Segoe UI', Arial, sans-serif",
+      padding: "16px",
+      boxSizing: "border-box",
+      color: "#fff",
+    },
+    header: {
+      width: "100%", maxWidth: "720px",
+      display: "flex", justifyContent: "space-between", alignItems: "center",
+      marginBottom: "24px", paddingTop: "8px",
+    },
+    logo: { fontSize: "20px", fontWeight: "800", letterSpacing: "0.5px" },
+    navRow: { display: "flex", gap: "8px" },
+    navBtn: (active) => ({
+      padding: "8px 16px", borderRadius: "20px",
+      border: active ? "none" : "1px solid rgba(255,255,255,0.15)",
+      background: active ? ACCENT : "transparent",
+      color: active ? "#000" : "#fff",
+      fontSize: "12px", fontWeight: active ? "700" : "400",
+      cursor: "pointer", transition: "all 0.2s",
+    }),
+    section: {
+      width: "100%", maxWidth: "720px",
+      background: "rgba(255,255,255,0.04)",
+      border: "1px solid rgba(255,255,255,0.08)",
+      borderRadius: "20px", padding: "24px",
+      marginBottom: "16px", boxSizing: "border-box",
+    },
+    sectionTitle: { fontSize: "14px", letterSpacing: "2px", textTransform: "uppercase", color: "rgba(255,255,255,0.4)", marginBottom: "16px" },
+    input: {
+      width: "100%", padding: "12px 16px",
+      background: "rgba(255,255,255,0.07)",
+      border: "1px solid rgba(255,255,255,0.12)",
+      borderRadius: "12px", color: "#fff", fontSize: "15px",
+      boxSizing: "border-box", outline: "none", fontFamily: "inherit",
+    },
+    label: { color: "rgba(255,255,255,0.55)", fontSize: "12px", letterSpacing: "1px", textTransform: "uppercase", marginBottom: "6px", display: "block" },
+    historyCard: {
+      background: "rgba(255,255,255,0.04)",
+      border: "1px solid rgba(255,255,255,0.08)",
+      borderRadius: "14px", padding: "16px 18px",
+      marginBottom: "10px", display: "flex",
+      justifyContent: "space-between", alignItems: "center",
+    },
+  };
+
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      return (
+        <div style={{ background: "#1a2035", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "10px", padding: "10px 14px" }}>
+          <p style={{ color: "rgba(255,255,255,0.6)", fontSize: "12px", margin: "0 0 4px" }}>{label}</p>
+          {payload.map((p, i) => (
+            <p key={i} style={{ color: p.color, fontSize: "14px", fontWeight: "700", margin: "2px 0" }}>{p.value} {p.name}</p>
+          ))}
+        </div>
+      );
+    }
+    return null;
+  };
+
+  return (
+    <div style={S.root}>
+      {/* Header */}
+      <div style={S.header}>
+        <div style={S.logo}>💪 <span style={{ color: ACCENT }}>Fit</span>Track</div>
+        <div style={S.navRow}>
+          <button style={S.navBtn(view === "dashboard")} onClick={() => setView("dashboard")}>Dashboard</button>
+          <button style={S.navBtn(view === "log")} onClick={() => setView("log")}>+ Log</button>
+          <button style={S.navBtn(view === "history")} onClick={() => setView("history")}>History</button>
+        </div>
+      </div>
+
+      {/* ── DASHBOARD ── */}
+      {view === "dashboard" && (
+        <>
+          {/* Week strip */}
+          <div style={{ ...S.section, padding: "18px 24px" }}>
+            <div style={S.sectionTitle}>This Week</div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "6px" }}>
+              {weekDays.map(d => {
+                const hasLog = logs.some(l => l.date === d.date);
+                return (
+                  <div key={d.date} style={{ textAlign: "center", flex: 1 }}>
+                    <div style={{ fontSize: "11px", color: d.isToday ? ACCENT : "rgba(255,255,255,0.35)", marginBottom: "6px", fontWeight: d.isToday ? "700" : "400" }}>{d.label}</div>
+                    <div style={{
+                      width: "32px", height: "32px", borderRadius: "50%", margin: "0 auto",
+                      background: hasLog ? ACCENT : "rgba(255,255,255,0.07)",
+                      border: d.isToday ? `2px solid ${ACCENT}` : "2px solid transparent",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: "14px",
+                    }}>
+                      {hasLog ? "✓" : ""}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Today stats */}
+          <div style={S.section}>
+            <div style={S.sectionTitle}>Today's Summary</div>
+            <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+              <StatCard icon="👟" label="Steps" value={todaySteps.toLocaleString()} unit="steps" color={ACCENT} />
+              <StatCard icon="🔥" label="Calories" value={todayCalories} unit="kcal" color={ACCENT2} />
+              <StatCard icon="⏱️" label="Active" value={todayMinutes} unit="min" color={ACCENT3} />
+              <StatCard icon="🏋️" label="Workouts" value={todayWorkouts} unit="done" color="#f9c74f" />
+            </div>
+          </div>
+
+          {/* Goals */}
+          <div style={S.section}>
+            <div style={S.sectionTitle}>Daily Goals</div>
+            <ProgressBar label="Steps" value={todaySteps} max={10000} color={ACCENT} current={todaySteps.toLocaleString()} goal="10,000" />
+            <ProgressBar label="Calories Burned" value={todayCalories} max={500} color={ACCENT2} current={todayCalories} goal="500 kcal" />
+            <ProgressBar label="Active Minutes" value={todayMinutes} max={60} color={ACCENT3} current={todayMinutes} goal="60 min" />
+          </div>
+
+          {/* Weekly calories chart */}
+          <div style={S.section}>
+            <div style={S.sectionTitle}>Weekly Calories Burned</div>
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={weekData} barSize={28}>
+                <XAxis dataKey="day" tick={{ fill: "rgba(255,255,255,0.4)", fontSize: 12 }} axisLine={false} tickLine={false} />
+                <YAxis hide />
+                <Tooltip content={<CustomTooltip />} />
+                <Bar dataKey="calories" name="kcal" fill={ACCENT} radius={[6, 6, 0, 0]} opacity={0.85} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Weekly steps line chart */}
+          <div style={S.section}>
+            <div style={S.sectionTitle}>Weekly Steps</div>
+            <ResponsiveContainer width="100%" height={160}>
+              <LineChart data={weekData}>
+                <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+                <XAxis dataKey="day" tick={{ fill: "rgba(255,255,255,0.4)", fontSize: 12 }} axisLine={false} tickLine={false} />
+                <YAxis hide />
+                <Tooltip content={<CustomTooltip />} />
+                <Line type="monotone" dataKey="steps" name="steps" stroke={ACCENT3} strokeWidth={2.5} dot={{ fill: ACCENT3, r: 4 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </>
+      )}
+
+      {/* ── LOG WORKOUT ── */}
+      {view === "log" && (
+        <div style={{ ...S.section, maxWidth: "560px" }}>
+          <div style={{ fontSize: "20px", fontWeight: "800", marginBottom: "24px" }}>Log Workout</div>
+
+          <label style={S.label}>Exercise Type</label>
+          <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}
+            style={{ ...S.input, marginBottom: "16px", appearance: "none", cursor: "pointer" }}>
+            {EXERCISE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+
+          <label style={S.label}>Duration (minutes)</label>
+          <input type="number" min="1" placeholder="e.g. 30"
+            value={form.minutes} onChange={e => setForm(f => ({ ...f, minutes: e.target.value }))}
+            style={{ ...S.input, marginBottom: "16px" }} />
+
+          <label style={S.label}>Steps (optional)</label>
+          <input type="number" min="0" placeholder="e.g. 3500"
+            value={form.steps} onChange={e => setForm(f => ({ ...f, steps: e.target.value }))}
+            style={{ ...S.input, marginBottom: "16px" }} />
+
+          <label style={S.label}>Date</label>
+          <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+            style={{ ...S.input, marginBottom: "20px", colorScheme: "dark" }} />
+
+          {/* Calorie preview */}
+          {form.minutes && Number(form.minutes) > 0 && (
+            <div style={{ background: `${ACCENT}11`, border: `1px solid ${ACCENT}33`, borderRadius: "12px", padding: "12px 16px", marginBottom: "20px" }}>
+              <span style={{ color: "rgba(255,255,255,0.6)", fontSize: "13px" }}>Estimated calories: </span>
+              <span style={{ color: ACCENT, fontWeight: "800", fontSize: "18px" }}>{calcCalories(form.type, Number(form.minutes))} kcal</span>
+            </div>
+          )}
+
+          {formError && <div style={{ color: ACCENT2, fontSize: "13px", marginBottom: "12px" }}>{formError}</div>}
+
+          <button onClick={submitLog} style={{
+            width: "100%", padding: "14px",
+            background: added ? "#22c55e" : ACCENT,
+            color: "#000", border: "none", borderRadius: "14px",
+            fontSize: "16px", fontWeight: "800", cursor: "pointer", transition: "background 0.3s",
+          }}>
+            {added ? "✓ Logged!" : "Save Workout"}
+          </button>
+        </div>
+      )}
+
+      {/* ── HISTORY ── */}
+      {view === "history" && (
+        <div style={{ width: "100%", maxWidth: "720px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+            <div style={{ fontSize: "20px", fontWeight: "800" }}>Workout History</div>
+            <div style={{ color: "rgba(255,255,255,0.4)", fontSize: "13px" }}>{logs.length} entries</div>
+          </div>
+
+          {logs.length === 0 && (
+            <div style={{ color: "rgba(255,255,255,0.3)", textAlign: "center", padding: "60px", fontSize: "15px" }}>
+              No workouts yet. Log your first one!
+            </div>
+          )}
+
+          {[...logs].sort((a, b) => b.date.localeCompare(a.date)).map(log => (
+            <div key={log.id} style={S.historyCard}>
+              <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+                <div style={{
+                  width: "44px", height: "44px", borderRadius: "12px",
+                  background: `${ACCENT}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px", flexShrink: 0,
+                }}>
+                  {log.type === "Running" ? "🏃" : log.type === "Walking" ? "🚶" : log.type === "Cycling" ? "🚴" : log.type === "Swimming" ? "🏊" : log.type === "Yoga" ? "🧘" : log.type === "HIIT" ? "⚡" : "🏋️"}
+                </div>
+                <div>
+                  <div style={{ fontWeight: "700", fontSize: "15px" }}>{log.type}</div>
+                  <div style={{ color: "rgba(255,255,255,0.4)", fontSize: "12px", marginTop: "2px" }}>{log.date} · {log.minutes} min{log.steps ? ` · ${log.steps.toLocaleString()} steps` : ""}</div>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ color: ACCENT2, fontWeight: "800", fontSize: "16px" }}>{log.calories}</div>
+                  <div style={{ color: "rgba(255,255,255,0.35)", fontSize: "11px" }}>kcal</div>
+                </div>
+                <button onClick={() => deleteLog(log.id)} style={{
+                  background: "transparent", border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: "8px", color: "rgba(255,255,255,0.3)", fontSize: "14px",
+                  padding: "6px 10px", cursor: "pointer",
+                }}>🗑️</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p style={{ color: "rgba(255,255,255,0.12)", fontSize: "11px", marginTop: "24px", letterSpacing: "1px" }}>
+        CodeAlpha Internship · Task 3
+      </p>
+    </div>
+  );
+}
